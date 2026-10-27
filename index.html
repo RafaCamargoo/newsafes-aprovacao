@@ -570,6 +570,22 @@
       .hero3d__note { top: 4px; right: 14px; font-size: .6rem; }
       .hero3d__pin span { padding: 4px 8px; font-size: .64rem; }
     }
+
+    .hero3d__pin.is-esq { flex-direction: row-reverse; }
+    .hero3d__pin.is-esq i { margin: -6px -6px 0 0; }
+    /* Hero 3D guiada pela rolagem: a capa fica presa enquanto a estrutura abre */
+    .hero-scroll { position: relative; height: 230vh; }
+    .hero-scroll > .hero { position: sticky; top: 0; height: 100vh; height: 100svh; min-height: 0; }
+    .hero3d__scroll { display: flex; flex-direction: column; align-items: flex-end; gap: 8px; }
+    .hero3d__scroll-label { color: var(--gold-bright); font-size: .8rem; font-weight: 800; letter-spacing: .02em; transition: opacity .3s ease; }
+    .hero3d__bar { position: relative; display: block; width: 190px; height: 3px; border-radius: 3px; background: rgba(255,255,255,.16); overflow: hidden; }
+    .hero3d__bar b { position: absolute; inset: 0; border-radius: 3px; background: var(--gold-bright); transform: scaleX(var(--p, 0)); transform-origin: left; }
+    @media (max-width: 680px) {
+      .hero-scroll { height: 200vh; }
+      .hero3d__scroll { align-items: center; }
+      .hero3d__scroll-label { font-size: .72rem; white-space: nowrap; }
+      .hero3d__bar { width: 150px; }
+    }
 </style>
 </head>
 <body>
@@ -581,6 +597,7 @@
   </header>
 
   <main>
+    <div class="hero-scroll" id="heroScroll">
     <section class="hero hero--3d" id="topo">
       <div class="hero__scrim"></div>
       <div class="hero3d" id="hero3d">
@@ -589,7 +606,7 @@
         <div class="hero3d__pins" aria-hidden="true"></div>
         <p class="hero3d__note">Representação 3D ilustrativa</p>
         <div class="hero3d__ui">
-          <button class="hero3d__toggle" type="button" aria-pressed="false">Ver a estrutura por dentro</button>
+          <div class="hero3d__scroll" aria-hidden="true"><span class="hero3d__scroll-label">Role para ver a estrutura por dentro</span><i class="hero3d__bar"><b></b></i></div>
           <span class="hero3d__hint" aria-hidden="true"><svg viewBox="0 0 24 24"><path d="M8 13V6.5a1.5 1.5 0 0 1 3 0V12m0-1.5v-2a1.5 1.5 0 0 1 3 0V12m0-1a1.5 1.5 0 0 1 3 0v4a6 6 0 0 1-6 6h-.5a6 6 0 0 1-5-2.7L3.6 15a1.5 1.5 0 0 1 2.5-1.7L8 15"></path></svg>Arraste para girar</span>
         </div>
       </div>
@@ -605,6 +622,7 @@
         </div>
       </div>
     </section>
+    </div>
 
     <section class="clients" aria-labelledby="clients-title">
       <div class="container clients-head reveal is-visible">
@@ -1135,7 +1153,9 @@ function montar() {
   const reduzido = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
   const canvas = palco.querySelector('.hero3d__canvas');
   const camadaPinos = palco.querySelector('.hero3d__pins');
-  const botao = palco.querySelector('.hero3d__toggle');
+  const rolagem = document.getElementById('heroScroll');
+  const barra = palco.querySelector('.hero3d__bar');
+  const rotulo = palco.querySelector('.hero3d__scroll-label');
 
   let renderer;
   try {
@@ -1328,19 +1348,25 @@ function montar() {
   });
 
   /* ---------- interação ---------- */
-  let aberto = false;
   let abre = 0;                  // 0 = montado, 1 = aberto
   const pose = { ...POSE_MONTADO };
   let giroUsuario = 0, altUsuario = 0, velocidade = 0;
   let arrastando = false, ultimoX = 0, ultimoY = 0, inicioArraste = null;
 
-  botao.addEventListener('click', () => {
-    aberto = !aberto;
-    giroUsuario = 0; altUsuario = 0; velocidade = 0;
-    botao.setAttribute('aria-pressed', aberto ? 'true' : 'false');
-    botao.textContent = aberto ? 'Ver o painel montado' : 'Ver a estrutura por dentro';
-    palco.classList.toggle('is-aberto', aberto);
-  });
+  /* Progresso da rolagem: 0 com a capa no topo, 1 quando a área presa termina. */
+  let progresso = 0;
+  function lerRolagem() {
+    if (!rolagem) return;
+    const r = rolagem.getBoundingClientRect();
+    const total = Math.max(1, rolagem.offsetHeight - window.innerHeight);
+    progresso = THREE.MathUtils.clamp(-r.top / total, 0, 1);
+    if (barra) barra.style.setProperty('--p', progresso.toFixed(3));
+    if (rotulo) rotulo.textContent = progresso > 0.92 ? 'Esta é a parte que a New Safes fabrica' : 'Role para ver a estrutura por dentro';
+    palco.classList.toggle('is-aberto', progresso > 0.5);
+  }
+  window.addEventListener('scroll', () => { lerRolagem(); pedir(); }, { passive: true });
+  window.addEventListener('resize', lerRolagem);
+  lerRolagem();
 
   canvas.addEventListener('pointerdown', (e) => {
     arrastando = true; ultimoX = e.clientX; ultimoY = e.clientY; inicioArraste = { x: e.clientX, y: e.clientY, tipo: e.pointerType };
@@ -1396,15 +1422,14 @@ function montar() {
     tela.uniforms.uTempo.value = t;
 
     // vista aberta/montada
-    const alvoAbre = aberto ? 1 : 0;
-    abre = reduzido ? alvoAbre : abre + (alvoAbre - abre) * (1 - Math.exp(-dt * 3.2));
+    // a abertura acompanha a rolagem (começa em 8% e termina em 80% do trecho preso)
+    const alvoAbre = THREE.MathUtils.clamp((progresso - 0.08) / 0.72, 0, 1);
+    abre = reduzido ? alvoAbre : abre + (alvoAbre - abre) * (1 - Math.exp(-dt * 10));
     const e = suave(abre);
     peles.forEach((p) => { p.position.z = e * 0.5; p.position.y = e * 0.04; });
-    const destino = aberto ? POSE_ABERTO : POSE_MONTADO;
-    const k = reduzido ? 1 : 1 - Math.exp(-dt * 2.4);
-    pose.giro += (destino.giro - pose.giro) * k;
-    pose.alt += (destino.alt - pose.alt) * k;
-    pose.zoom += (destino.zoom - pose.zoom) * k;
+    pose.giro = POSE_MONTADO.giro + (POSE_ABERTO.giro - POSE_MONTADO.giro) * e;
+    pose.alt = POSE_MONTADO.alt + (POSE_ABERTO.alt - POSE_MONTADO.alt) * e;
+    pose.zoom = POSE_MONTADO.zoom + (POSE_ABERTO.zoom - POSE_MONTADO.zoom) * e;
 
     // inércia do arraste e balanço suave quando ninguém mexe
     if (!arrastando) { giroUsuario += velocidade; velocidade *= Math.pow(0.04, dt); }
@@ -1428,7 +1453,10 @@ function montar() {
       if (!obj) return;
       obj.getWorldPosition(v);
       v.project(camera);
-      el.style.transform = `translate(${((v.x + 1) / 2) * largura}px, ${((1 - v.y) / 2) * altura}px)`;
+      const px = ((v.x + 1) / 2) * largura, py = ((1 - v.y) / 2) * altura;
+      const esq = px > largura - 190;          // perto da borda direita: rótulo vira para a esquerda
+      el.classList.toggle('is-esq', esq);
+      el.style.transform = `translate(${px}px, ${py}px)` + (esq ? ' translateX(-100%)' : '');
       el.style.visibility = v.z > 1 ? 'hidden' : 'visible';
     });
 
